@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="src/EntityTracker.AspNetCore/EntityTracker.AspNetCore.csproj"/>
+  <Project Path="src/EntityTracker.Generator/EntityTracker.Generator.csproj"/>
+  <Project Path="samples/TrackingSample/TrackingSample.csproj"/>
+  <Project Path="tests/EntityTracker.Tests/EntityTracker.Tests.csproj"/>
+</Solution>

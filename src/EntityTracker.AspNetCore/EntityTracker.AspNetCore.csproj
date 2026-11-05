@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Version>0.1.0</Version>
+    <Description>Attribute-driven EF Core change notifications with scoped SignalR subscriptions.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../EntityTracker.Generator/EntityTracker.Generator.csproj" ReferenceOutputAssembly="false" PrivateAssets="all"/>
+    <None Include="../EntityTracker.Generator/bin/$(Configuration)/netstandard2.0/EntityTracker.Generator.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false"/>
+    <FrameworkReference Include="Microsoft.AspNetCore.App"/>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.3"/>
+    <None Include="../../README.md" Pack="true" PackagePath="/"/>
+  </ItemGroup>
+</Project>

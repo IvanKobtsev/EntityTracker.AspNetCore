@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
+  <ItemGroup Condition="'$(UsePackedEntityTracker)' != 'true'">
+    <ProjectReference Include="../../src/EntityTracker.AspNetCore/EntityTracker.AspNetCore.csproj"/>
+    <ProjectReference Include="../../src/EntityTracker.Generator/EntityTracker.Generator.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
+  </ItemGroup>
+  <ItemGroup Condition="'$(UsePackedEntityTracker)' == 'true'">
+    <PackageReference Include="EntityTracker.AspNetCore" Version="0.1.0"/>
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.3"/>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.3"/>
+  </ItemGroup>
+</Project>
