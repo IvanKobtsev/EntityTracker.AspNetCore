@@ -4,6 +4,8 @@ Attribute-driven EF Core change notifications for .NET 10. Clients explicitly su
 
 Install `EntityTracker.AspNetCore`. The package includes its source generator as a Roslyn analyzer; no separate generator package is required. Domain classes need neither interfaces nor `partial` declarations.
 
+For repository contributors: `src/EntityTracker.Generator` is an internal build project, not a separate package. It compiles the analyzer DLL bundled in `EntityTracker.AspNetCore`; keep this project in the solution and source tree.
+
 ```csharp
 [Tracked]
 public class Note
