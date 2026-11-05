@@ -6,6 +6,10 @@
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <Copyright>Copyright (c) 2026 IvanKobtsev</Copyright>
+    <PackageTags>entityframeworkcore efcore signalr aspnetcore change-tracking subscriptions source-generator dotnet</PackageTags>
+    <PackageProjectUrl>https://github.com/IvanKobtsev/EntityTracker.AspNetCore</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/IvanKobtsev/EntityTracker.AspNetCore</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../EntityTracker.Generator/EntityTracker.Generator.csproj" ReferenceOutputAssembly="false" PrivateAssets="all"/>
