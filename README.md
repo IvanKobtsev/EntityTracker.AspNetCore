@@ -76,16 +76,22 @@ Explicit mapping replaces the automatic endpoint; the default route is not also 
 
 Referenced entity assemblies are discovered recursively, even before their types have been used. For plugins outside that graph, add `options.Assemblies.Add(typeof(PluginEntity).Assembly)` in the configuration callback. Each generated assembly is registered once; conflicting entity names across assemblies are rejected at startup.
 
-To include notification metadata, pass its implementation alongside the scope resolver:
+To include notification metadata, declare a DTO and pass its provider alongside the scope resolver:
 
 ```csharp
+public sealed record TrackingMetadata(string? UserId, string? SessionId);
+public sealed class MyTrackingMetadataProvider : ITrackingMetadataProvider<TrackingMetadata>
+{
+    public TrackingMetadata? GetMetadata() => new("example-user", "example-session");
+}
+
 builder.Services.AddEntityTracker<MyScopeResolver, MyTrackingMetadataProvider>();
 // A configuration callback is supported by both overloads:
 builder.Services.AddEntityTracker<MyScopeResolver, MyTrackingMetadataProvider>(o =>
     o.HubPath = "/realtime/entities");
 ```
 
-Choose one registration above. The metadata provider is registered with a scoped lifetime and may inject request/job services. It implements `ITrackingMetadataProvider.GetMetadata()` and returns string key/value pairs such as user/session IDs. The interceptor attaches those values to notifications after a successful save. Metadata does not affect scope or subscriptions. The scope-only overload remains available when no metadata is needed. Additional providers can be registered through DI; metadata keys must be unique across providers.
+Choose one registration above. The provider is scoped and may inject request/job services. It implements `ITrackingMetadataProvider<TrackingMetadata>` and returns the declared DTO or null. The DTO type is inferred from the provider?s single `ITrackingMetadataProvider<TMetadata>` interface, including inherited implementations, without constructing the provider. Register tracking once with one provider; compose multiple contributions inside that provider. Metadata does not affect scope or subscriptions. The scope-only overload remains available.
 
 ## Scope resolver examples
 
@@ -206,7 +212,8 @@ For a tracked `Note` with `NotePayload` and a tracked `Folder` without a payload
 
 ```json
 {
-  "version": 1,
+  "version": 2,
+  "metadata": null,
   "entities": {
     "Folder": { "payloadType": null, "payloadNullable": true },
     "Note": { "payloadType": "MyApp.NotePayload", "payloadNullable": false }
@@ -222,6 +229,10 @@ For a tracked `Note` with `NotePayload` and a tracked `Folder` without a payload
   }
 }
 ```
+
+Version 2 adds `metadata`: null without a provider, otherwise `{ "type": "MyApp.TrackingMetadata", "nullable": true, "schema": { ... } }`. The schema is a standalone JSON Schema resource with a `urn:entitytracker:metadata:` ID, exported from the declared DTO with SignalR JSON settings. Frontend generators can use it to type event metadata. Schema generation does not instantiate the provider.
+
+Migration: replace the dictionary-based `ITrackingMetadataProvider` with `ITrackingMetadataProvider<TMetadata>` and use the two-type registration overload. `EntityChangeEvent.Metadata` is now `object?`; on the wire it contains the declared DTO representation. Consumers of the spec should accept version 2.
 
 `entities` uses the configured tracking names, including `[Tracked(Name = ...)]` overrides. `payloadType` is an opaque key into `payloads`; `null` means no payload is configured. `payloadNullable` preserves the payload member's declared root nullability. Shared types have one schema entry. Nested DTOs, collections, dictionaries, enums, and nullable properties are described within those schemas; recursive types use JSON Schema references scoped to each schema's `$id`.
 

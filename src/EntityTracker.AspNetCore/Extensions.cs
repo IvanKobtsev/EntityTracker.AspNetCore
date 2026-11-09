@@ -24,18 +24,30 @@ public static class EntityTrackerExtensions
 
     /// <summary>Registers tracking with scoped implementations for audience resolution and notification metadata.</summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
-    public static IServiceCollection AddEntityTracker<TScope, TMetadata>(this IServiceCollection services, Action<EntityTrackerOptions>? configure = null)
+    public static IServiceCollection AddEntityTracker<TScope, TProvider>(this IServiceCollection services, Action<EntityTrackerOptions>? configure = null)
         where TScope : class, ITrackingScopeResolver
-        where TMetadata : class, ITrackingMetadataProvider
+        where TProvider : class
     {
-        Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddEnumerable(
-            services, ServiceDescriptor.Scoped<ITrackingMetadataProvider, TMetadata>());
-        return AddEntityTrackerCore<TScope>(services, configure, System.Reflection.Assembly.GetCallingAssembly());
+        if (services.Any(x => x.ServiceType == typeof(TrackingRegistry)))
+            throw new InvalidOperationException("EntityTracker must be registered once with one metadata provider.");
+        var providerType = typeof(TProvider);
+        var contracts = providerType.GetInterfaces()
+            .Where(x => x.IsGenericType && x.GetGenericTypeDefinition() == typeof(ITrackingMetadataProvider<>))
+            .ToArray();
+        if (providerType.IsAbstract || providerType.IsInterface || contracts.Length != 1)
+            throw new InvalidOperationException($"Metadata provider '{providerType.FullName}' must be a concrete class implementing exactly one ITrackingMetadataProvider<TMetadata> interface.");
+        var contract = contracts[0];
+        var metadataType = contract.GetGenericArguments()[0];
+        services.AddScoped(contract, providerType);
+        services.AddScoped(typeof(ITrackingMetadataAccessor), typeof(TrackingMetadataAccessor<>).MakeGenericType(metadataType));
+        return AddEntityTrackerCore<TScope>(services, configure, System.Reflection.Assembly.GetCallingAssembly(), metadataType);
     }
 
-    private static IServiceCollection AddEntityTrackerCore<TScope>(IServiceCollection services, Action<EntityTrackerOptions>? configure, System.Reflection.Assembly callingAssembly)
+    private static IServiceCollection AddEntityTrackerCore<TScope>(IServiceCollection services, Action<EntityTrackerOptions>? configure, System.Reflection.Assembly callingAssembly, Type? metadataType = null)
         where TScope : class, ITrackingScopeResolver
     {
+        if (services.Any(x => x.ServiceType == typeof(TrackingRegistry)))
+            throw new InvalidOperationException("EntityTracker must be registered once.");
         var options = new EntityTrackerOptions(); configure?.Invoke(options);
         services.AddSingleton(sp =>
         {
@@ -43,7 +55,7 @@ public static class EntityTrackerExtensions
             var applicationName = sp.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.ApplicationName;
             if (!string.IsNullOrWhiteSpace(applicationName)) roots.Add(System.Reflection.Assembly.Load(applicationName));
             GeneratedTrackingDiscovery.Register(options, roots);
-            return new TrackingRegistry(options);
+            return new TrackingRegistry(options) { MetadataType = metadataType };
         });
         services.AddSingleton(options.Factory);
         services.AddHttpContextAccessor();

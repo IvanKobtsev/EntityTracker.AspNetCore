@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using System.Security.Claims;
 using EntityTracker.AspNetCore;
 using Microsoft.Data.Sqlite;
@@ -25,15 +26,41 @@ public class TrackingTests
         public Task Unsubscribe(string[] names) => Task.CompletedTask;
         public Task EntitiesChanged(EntityChangeEvent change) { Events.Add((current, change)); return Task.CompletedTask; }
     }
-    private static (SqliteConnection Connection, Database Db, Sink Sink) Open()
+    private static (SqliteConnection Connection, Database Db, Sink Sink) Open(IServiceProvider? services = null)
     {
         var connection = new SqliteConnection("Data Source=:memory:"); connection.Open();
         var options = new EntityTrackerOptions().Add(new(typeof(Item), "Item", x => ((Item)x).Id.ToString(), x => ((Item)x).Name));
         var sink = new Sink();
-        var interceptor = new EntityTrackerInterceptor(new(options), new Scope(), sink, NullLogger<EntityTrackerInterceptor>.Instance, []);
+        var interceptor = new EntityTrackerInterceptor(new(options), new Scope(), sink, NullLogger<EntityTrackerInterceptor>.Instance, services ?? new ServiceCollection().BuildServiceProvider());
         var db = new Database(new DbContextOptionsBuilder<Database>().UseSqlite(connection).AddInterceptors(interceptor).Options);
         db.Database.EnsureCreated();
         return (connection, db, sink);
+    }
+    public sealed record EventMetadata([property: System.Text.Json.Serialization.JsonPropertyName("session_id")] string Session);
+    public sealed class EventMetadataProvider : ITrackingMetadataProvider<EventMetadata>
+    {
+        public EventMetadata? Value { get; set; } = new("initial");
+        public EventMetadata? GetMetadata() => Value;
+    }
+    [Fact]
+    public async Task Typed_metadata_captures_latest_save_and_allows_null()
+    {
+        var registrations = new ServiceCollection(); registrations.AddLogging();
+        registrations.AddEntityTracker<Scope, EventMetadataProvider>();
+        using var provider = registrations.BuildServiceProvider();
+        using var scope = provider.CreateScope();
+        var metadata = (EventMetadataProvider)scope.ServiceProvider.GetRequiredService<ITrackingMetadataProvider<EventMetadata>>();
+        var (connection, db, sink) = Open(scope.ServiceProvider); using var c = connection; await using var d = db;
+        await using (var transaction = await db.Database.BeginTransactionAsync())
+        {
+            var item = new Item(); db.Add(item); await db.SaveChangesAsync();
+            metadata.Value = new("latest"); item.Name = "changed"; await db.SaveChangesAsync();
+            Assert.Empty(sink.Events); await transaction.CommitAsync();
+        }
+        var json = Assert.IsType<System.Text.Json.JsonElement>(Assert.Single(sink.Events).Event.Metadata);
+        Assert.Equal("latest", json.GetProperty("session_id").GetString());
+        metadata.Value = null; db.Add(new Item()); await db.SaveChangesAsync();
+        Assert.Null(sink.Events[1].Event.Metadata);
     }
     [Fact]
     public async Task Generated_ids_and_owned_changes_are_published()
@@ -104,7 +131,7 @@ public class TrackingTests
     {
         var options = new EntityTrackerOptions().Add(new(typeof(Item), "Item", x => ((Item)x).Id.ToString(), x => ((Item)x).Name));
         var sink = new Sink();
-        var interceptor = new EntityTrackerInterceptor(new(options), new Scope(), sink, NullLogger<EntityTrackerInterceptor>.Instance, []);
+        var interceptor = new EntityTrackerInterceptor(new(options), new Scope(), sink, NullLogger<EntityTrackerInterceptor>.Instance, new ServiceCollection().BuildServiceProvider());
         using var firstConnection = new SqliteConnection("Data Source=:memory:"); firstConnection.Open();
         using var secondConnection = new SqliteConnection("Data Source=:memory:"); secondConnection.Open();
         await using var first = new Database(new DbContextOptionsBuilder<Database>().UseSqlite(firstConnection).AddInterceptors(interceptor).Options);

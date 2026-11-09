@@ -41,9 +41,22 @@ internal static class PayloadSpecification
                 ["payloadNullable"] = descriptor.PayloadType == null || descriptor.PayloadNullable
             };
         }
+        JsonNode? metadata = null;
+        if (registry.MetadataType is { } metadataType)
+        {
+            var key = metadataType.FullName ?? metadataType.Name;
+            var schema = options.GetJsonSchemaAsNode(metadataType, new JsonSchemaExporterOptions { TreatNullObliviousAsNonNullable = true });
+            if (schema is JsonObject obj)
+            {
+                obj["$schema"] = "https://json-schema.org/draft/2020-12/schema";
+                obj["$id"] = "urn:entitytracker:metadata:" + Uri.EscapeDataString(key);
+            }
+            metadata = new JsonObject { ["type"] = key, ["nullable"] = true, ["schema"] = schema };
+        }
         return JsonSerializer.SerializeToUtf8Bytes(new JsonObject
         {
-            ["version"] = 1,
+            ["version"] = 2,
+            ["metadata"] = metadata,
             ["entities"] = entities,
             ["payloads"] = payloads
         });

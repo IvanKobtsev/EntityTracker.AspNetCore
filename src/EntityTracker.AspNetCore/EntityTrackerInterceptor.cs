@@ -13,14 +13,14 @@ public sealed class EntityTrackerInterceptor(
     TrackingRegistry registry, ITrackingScopeResolver scopes,
     IEntityTrackerClientFactory hub,
     ILogger<EntityTrackerInterceptor> logger,
-    IEnumerable<ITrackingMetadataProvider> metadata,
+    IServiceProvider services,
     IHttpContextAccessor? http = null) : DbTransactionInterceptor, ISaveChangesInterceptor
 {
     private sealed class State
     {
         public List<(object Entity, TrackingDescriptor Descriptor)> Saving = [];
         public Dictionary<(string Scope, string Name, string Id), EntityChange> Pending = [];
-        public Dictionary<string, string>? Metadata;
+        public object? Metadata;
         public Guid? TransactionId;
     }
     private readonly ConditionalWeakTable<DbContext, State> states = new();
@@ -68,8 +68,7 @@ public sealed class EntityTrackerInterceptor(
                 if (id == null) throw new InvalidOperationException("Tracking IDs cannot be null.");
                 state.Pending[(scope, descriptor.Name, id)] = new(id, descriptor.GetPayload(entity));
             }
-            state.Metadata = metadata.Select(x => x.GetMetadata()).Where(x => x != null)
-                .SelectMany(x => x!).ToDictionary(x => x.Key, x => x.Value);
+            state.Metadata = (services.GetService(typeof(ITrackingMetadataAccessor)) as ITrackingMetadataAccessor)?.GetMetadata();
             if (context.Database.CurrentTransaction == null) await Publish(context);
         }
         catch (Exception exception)

@@ -33,6 +33,37 @@ public enum SpecState { Open, Closed }
 
 public class PayloadSpecTests
 {
+    public sealed class SpecMetadataProvider : ITrackingMetadataProvider<SpecPayload>
+    {
+        public SpecMetadataProvider() => throw new InvalidOperationException("Must not construct provider for spec.");
+        public SpecPayload? GetMetadata() => throw new InvalidOperationException();
+    }
+    [Fact]
+    public async Task Metadata_schema_uses_declared_type_without_resolving_provider()
+    {
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseTestServer(); builder.Logging.ClearProviders();
+        builder.Services.AddEntityTracker<HubTests.Scope, SpecMetadataProvider>();
+        builder.Services.Configure<Microsoft.AspNetCore.SignalR.JsonHubProtocolOptions>(o =>
+            o.PayloadSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower);
+        await using var app = builder.Build();
+        app.MapEntityTrackerSpec(); await app.StartAsync();
+        using var doc = JsonDocument.Parse(await app.GetTestClient().GetStringAsync("/entity-tracker/spec.json"));
+        var metadata = doc.RootElement.GetProperty("metadata");
+        Assert.Equal(typeof(SpecPayload).FullName, metadata.GetProperty("type").GetString());
+        Assert.True(metadata.GetProperty("nullable").GetBoolean());
+        var schema = metadata.GetProperty("schema");
+        Assert.StartsWith("urn:entitytracker:metadata:", schema.GetProperty("$id").GetString());
+        var properties = schema.GetProperty("properties");
+        Assert.True(properties.TryGetProperty("display_name", out _));
+        Assert.False(properties.TryGetProperty("secret", out _));
+        Assert.Equal("array", properties.GetProperty("children").GetProperty("type").GetString());
+        Assert.True(properties.GetProperty("counts").TryGetProperty("additionalProperties", out _));
+        Assert.Contains("null", properties.GetProperty("description").GetProperty("type").EnumerateArray().Select(x => x.GetString()));
+        Assert.Contains("Open", properties.GetProperty("state").GetProperty("enum").EnumerateArray().Select(x => x.GetString()));
+        Assert.Contains("\"$ref\"", properties.GetProperty("next").GetRawText());
+    }
+
     [Fact]
     public async Task Default_path_supports_discovery_and_endpoint_conventions()
     {
@@ -69,7 +100,8 @@ public class PayloadSpecTests
         var text = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(text);
         var root = doc.RootElement;
-        Assert.Equal(1, root.GetProperty("version").GetInt32());
+        Assert.Equal(2, root.GetProperty("version").GetInt32());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("metadata").ValueKind);
         var entities = root.GetProperty("entities");
         Assert.False(entities.TryGetProperty("SpecEntity", out _));
         var renamed = entities.GetProperty("Renamed");

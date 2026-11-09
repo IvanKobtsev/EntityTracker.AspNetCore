@@ -8,15 +8,15 @@ public sealed class TrackedAttribute : Attribute
     public string? PayloadMember { get; set; }
 }
 public sealed record EntityChange(string Id, object? Payload);
-public sealed record EntityChangeEvent(string EntityType, IReadOnlyList<EntityChange> Changes, IReadOnlyDictionary<string, string>? Metadata);
+public sealed record EntityChangeEvent(string EntityType, IReadOnlyList<EntityChange> Changes, object? Metadata);
 /// <summary>Resolve an authorized scope, stable for the connection lifetime.</summary>
 public interface ITrackingScopeResolver
 {
     ValueTask<string> ResolveAsync(System.Security.Claims.ClaimsPrincipal? user, CancellationToken cancellationToken);
 }
-public interface ITrackingMetadataProvider
+public interface ITrackingMetadataProvider<TMetadata> where TMetadata : class
 {
-    IReadOnlyDictionary<string, string>? GetMetadata();
+    TMetadata? GetMetadata();
 }
 public sealed record TrackingDescriptor(Type EntityType, string Name, Func<object, string> GetId, Func<object, object?> GetPayload,
     Type? PayloadType = null, bool PayloadNullable = true);
@@ -40,6 +40,7 @@ public sealed class EntityTrackerOptions
 }
 public sealed class TrackingRegistry
 {
+    public Type? MetadataType { get; internal set; }
     public Type HubType { get; }
     public string HubPath { get; }
     internal bool EndpointMapped { get; set; }
