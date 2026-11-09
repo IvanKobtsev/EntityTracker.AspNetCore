@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Schema;
+using System.Text.Json.Serialization.Metadata;
 
 namespace EntityTracker.AspNetCore;
 
@@ -8,57 +9,78 @@ internal static class PayloadSpecification
 {
     public static byte[] Generate(TrackingRegistry registry, JsonSerializerOptions serializer)
     {
-        // Clone instead of freezing/mutating the application's SignalR options.
         var options = new JsonSerializerOptions(serializer);
         options.MakeReadOnly(populateMissingResolver: true);
-        var entities = new JsonObject();
         var payloads = new JsonObject();
-        var types = new Dictionary<string, Type>(StringComparer.Ordinal);
-        foreach (var descriptor in registry.Descriptors.OrderBy(x => x.Name, StringComparer.Ordinal))
+        var names = new Dictionary<string, Type>(StringComparer.Ordinal);
+        string Describe(Type type)
         {
-            string? key = null;
-            if (descriptor.PayloadType is { } type)
+            var nullable = Nullable.GetUnderlyingType(type);
+            if (nullable != null) return Describe(nullable) + " | null | undefined";
+            var info = options.GetTypeInfo(type);
+            if (info.Kind == JsonTypeInfoKind.Object)
             {
-                key = type.FullName ?? type.Name;
-                if (types.TryGetValue(key, out var previous) && previous != type)
-                    throw new InvalidOperationException($"Payload type name collision: {key}.");
-                if (!types.ContainsKey(key))
+                var name = type.Name;
+                if (names.TryGetValue(name, out var previous))
                 {
-                    types.Add(key, type);
-                    var schema = options.GetJsonSchemaAsNode(type, new JsonSchemaExporterOptions { TreatNullObliviousAsNonNullable = true });
-                    // Each payload is its own schema resource so recursive '#' references remain valid.
-                    if (schema is JsonObject obj)
-                    {
-                        obj["$schema"] = "https://json-schema.org/draft/2020-12/schema";
-                        obj["$id"] = "urn:entitytracker:payload:" + Uri.EscapeDataString(key);
-                    }
-                    payloads[key] = schema;
+                    if (previous != type) throw new InvalidOperationException($"Payload type name collision: {name}.");
+                    return name;
                 }
+                names.Add(name, type);
+                var properties = new JsonArray();
+                payloads[name] = new JsonObject { ["properties"] = properties };
+                foreach (var property in info.Properties.Where(p => p.Get != null).OrderBy(p => p.Name, StringComparer.Ordinal))
+                {
+                    var expression = Describe(property.PropertyType);
+                    if (property.IsGetNullable && Nullable.GetUnderlyingType(property.PropertyType) == null) expression += " | null | undefined";
+                    properties.Add(new JsonObject { ["name"] = property.Name, ["type"] = expression });
+                }
+                return name;
             }
+            if (info.Kind == JsonTypeInfoKind.Dictionary)
+            {
+                var dictionary = type.GetInterfaces().Append(type).FirstOrDefault(t => t.IsGenericType &&
+                    (t.GetGenericTypeDefinition() == typeof(IDictionary<,>) || t.GetGenericTypeDefinition() == typeof(IReadOnlyDictionary<,>)));
+                return "{ [key: string]: " + (dictionary == null ? "any" : Describe(dictionary.GetGenericArguments()[1])) + " }";
+            }
+            if (info.Kind == JsonTypeInfoKind.Enumerable)
+            {
+                var element = type.IsArray ? type.GetElementType() : type.GetInterfaces().Append(type)
+                    .FirstOrDefault(t => t.IsGenericType && t.GetGenericTypeDefinition() == typeof(IEnumerable<>))?.GetGenericArguments()[0];
+                var expression = element == null ? "any" : Describe(element);
+                return (expression.Contains('|') ? "(" + expression + ")" : expression) + "[]";
+            }
+            var schema = options.GetJsonSchemaAsNode(type);
+            if (schema is not JsonObject obj) return "any";
+            if (obj["enum"] is JsonArray values) return string.Join(" | ", values.Select(v => v?.ToJsonString() ?? "null"));
+            var primitive = obj["type"] is JsonArray alternatives ? alternatives.FirstOrDefault(n => n?.ToString() != "null")?.ToString() : obj["type"]?.ToString();
+            return primitive switch
+            {
+                "string" => "string", "integer" or "number" => "number", "boolean" => "boolean", "null" => "null", _ => "any"
+            };
+        }
+        var entities = new JsonObject();
+        var types = new JsonArray();
+        foreach (var descriptor in registry.Descriptors.OrderBy(d => d.Name, StringComparer.Ordinal))
+        {
+            types.Add(descriptor.Name);
             entities[descriptor.Name] = new JsonObject
             {
-                ["payloadType"] = key,
+                ["payloadType"] = descriptor.PayloadType is { } type ? Describe(type) : null,
                 ["payloadNullable"] = descriptor.PayloadType == null || descriptor.PayloadNullable
             };
         }
-        JsonNode? metadata = null;
-        if (registry.MetadataType is { } metadataType)
-        {
-            var key = metadataType.FullName ?? metadataType.Name;
-            var schema = options.GetJsonSchemaAsNode(metadataType, new JsonSchemaExporterOptions { TreatNullObliviousAsNonNullable = true });
-            if (schema is JsonObject obj)
-            {
-                obj["$schema"] = "https://json-schema.org/draft/2020-12/schema";
-                obj["$id"] = "urn:entitytracker:metadata:" + Uri.EscapeDataString(key);
-            }
-            metadata = new JsonObject { ["type"] = key, ["nullable"] = true, ["schema"] = schema };
-        }
+        JsonNode? metadata = registry.MetadataType is { } metadataType
+            ? new JsonObject { ["type"] = Describe(metadataType), ["nullable"] = true } : null;
+        var sorted = new JsonObject();
+        foreach (var entry in payloads.OrderBy(p => p.Key, StringComparer.Ordinal)) sorted[entry.Key] = entry.Value?.DeepClone();
         return JsonSerializer.SerializeToUtf8Bytes(new JsonObject
         {
-            ["version"] = 2,
-            ["metadata"] = metadata,
-            ["entities"] = entities,
-            ["payloads"] = payloads
+            ["version"] = 3,
+            ["metadata"] = new JsonObject { ["description"] = "This is an extension data used by the automated client code generator for entity change tracking." },
+            ["types"] = types, ["payloads"] = sorted, ["entities"] = entities, ["eventMetadata"] = metadata
         });
     }
 }
+
+

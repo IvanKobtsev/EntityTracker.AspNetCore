@@ -208,37 +208,29 @@ app.MapEntityTrackerSpec("/entity-tracker/spec.json")
 
 The path above is also the default when no argument is supplied. This endpoint is opt-in; authorization conventions are applied by the host. It describes registered entities and their declared payload types, without constructing entities or invoking payload getters.
 
-For a tracked `Note` with `NotePayload` and a tracked `Folder` without a payload, the response looks like:
+Version 3 returns Tokyo's former x-domain-types contents directly, without a wrapper:
 
 ```json
 {
-  "version": 2,
-  "metadata": null,
-  "entities": {
-    "Folder": { "payloadType": null, "payloadNullable": true },
-    "Note": { "payloadType": "MyApp.NotePayload", "payloadNullable": false }
-  },
-  "payloads": {
-    "MyApp.NotePayload": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$id": "urn:entitytracker:payload:MyApp.NotePayload",
-      "type": "object",
-      "properties": { "title": { "type": "string" } },
-      "required": ["title"]
-    }
-  }
+  "version": 3,
+  "metadata": { "description": "This is an extension data used by the automated client code generator for entity change tracking." },
+  "types": ["Note"],
+  "payloads": { "NotePayload": { "properties": [{ "name": "title", "type": "string" }] } },
+  "entities": { "Note": { "payloadType": "NotePayload", "payloadNullable": false } },
+  "eventMetadata": null
 }
 ```
 
-Version 2 adds `metadata`: null without a provider, otherwise `{ "type": "MyApp.TrackingMetadata", "nullable": true, "schema": { ... } }`. The schema is a standalone JSON Schema resource with a `urn:entitytracker:metadata:` ID, exported from the declared DTO with SignalR JSON settings. Frontend generators can use it to type event metadata. Schema generation does not instantiate the provider.
+Migration from version 2: consume TypeScript property expressions instead of JSON Schema.
+Payload keys are short DTO names; conflicting names fail at endpoint setup. Nested DTOs are included
+and recursive references use their names. Arrays, dictionaries, enum literals and nullable members
+are supported. Nullable members use ` | null | undefined`. Names and ignored members follow SignalR
+JSON settings. Generation does not invoke getters or construct providers.
 
-Migration: replace the dictionary-based `ITrackingMetadataProvider` with `ITrackingMetadataProvider<TMetadata>` and use the two-type registration overload. `EntityChangeEvent.Metadata` is now `object?`; on the wire it contains the declared DTO representation. Consumers of the spec should accept version 2.
-
-`entities` uses the configured tracking names, including `[Tracked(Name = ...)]` overrides. `payloadType` is an opaque key into `payloads`; `null` means no payload is configured. `payloadNullable` preserves the payload member's declared root nullability. Shared types have one schema entry. Nested DTOs, collections, dictionaries, enums, and nullable properties are described within those schemas; recursive types use JSON Schema references scoped to each schema's `$id`.
-
-Schemas are exported with .NET's JSON Schema exporter using SignalR's configured JSON serializer settings, including naming policies, ignored properties, and supported converters. Numeric enums follow their JSON representation; string enum converters expose enum names. An `object` payload or a converter without schema information can produce an unconstrained schema. Use concrete payload types for useful client generation. The endpoint describes the JSON protocol even if additional SignalR protocols are enabled.
-
-The document is generated once when mapped. Unsupported payload contracts fail during endpoint setup. Entity data, getter results, and hub methods are not included. For manually registered `TrackingDescriptor` instances, supply `PayloadType` and `PayloadNullable`; generated registrations populate them automatically.
+Notification metadata moves from `metadata` to `eventMetadata`: null without a provider,
+otherwise `{ "type": "TrackingMetadata", "nullable": true }`, with its DTO included in payloads.
+The types array and entities mapping use configured tracking names. Entities without payloads
+retain a null payloadType. The endpoint path and authorization conventions are unchanged.
 
 ## Subscription contract
 

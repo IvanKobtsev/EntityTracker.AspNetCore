@@ -49,19 +49,10 @@ public class PayloadSpecTests
         await using var app = builder.Build();
         app.MapEntityTrackerSpec(); await app.StartAsync();
         using var doc = JsonDocument.Parse(await app.GetTestClient().GetStringAsync("/entity-tracker/spec.json"));
-        var metadata = doc.RootElement.GetProperty("metadata");
-        Assert.Equal(typeof(SpecPayload).FullName, metadata.GetProperty("type").GetString());
+        var metadata = doc.RootElement.GetProperty("eventMetadata");
+        Assert.Equal("SpecPayload", metadata.GetProperty("type").GetString());
         Assert.True(metadata.GetProperty("nullable").GetBoolean());
-        var schema = metadata.GetProperty("schema");
-        Assert.StartsWith("urn:entitytracker:metadata:", schema.GetProperty("$id").GetString());
-        var properties = schema.GetProperty("properties");
-        Assert.True(properties.TryGetProperty("display_name", out _));
-        Assert.False(properties.TryGetProperty("secret", out _));
-        Assert.Equal("array", properties.GetProperty("children").GetProperty("type").GetString());
-        Assert.True(properties.GetProperty("counts").TryGetProperty("additionalProperties", out _));
-        Assert.Contains("null", properties.GetProperty("description").GetProperty("type").EnumerateArray().Select(x => x.GetString()));
-        Assert.Contains("Open", properties.GetProperty("state").GetProperty("enum").EnumerateArray().Select(x => x.GetString()));
-        Assert.Contains("\"$ref\"", properties.GetProperty("next").GetRawText());
+        AssertPayload(doc.RootElement);
     }
 
     [Fact]
@@ -100,28 +91,31 @@ public class PayloadSpecTests
         var text = await response.Content.ReadAsStringAsync();
         using var doc = JsonDocument.Parse(text);
         var root = doc.RootElement;
-        Assert.Equal(2, root.GetProperty("version").GetInt32());
-        Assert.Equal(JsonValueKind.Null, root.GetProperty("metadata").ValueKind);
+        Assert.Equal(3, root.GetProperty("version").GetInt32());
+        Assert.Equal(JsonValueKind.Null, root.GetProperty("eventMetadata").ValueKind);
         var entities = root.GetProperty("entities");
         Assert.False(entities.TryGetProperty("SpecEntity", out _));
         var renamed = entities.GetProperty("Renamed");
         Assert.True(renamed.GetProperty("payloadNullable").GetBoolean());
         Assert.Equal(JsonValueKind.Null, entities.GetProperty("NoPayload").GetProperty("payloadType").ValueKind);
-        var schemas = root.GetProperty("payloads");
-        var schema = schemas.GetProperty(renamed.GetProperty("payloadType").GetString()!);
-        var properties = schema.GetProperty("properties");
-        Assert.True(properties.TryGetProperty("display_name", out _));
-        Assert.False(properties.TryGetProperty("secret", out _));
-        Assert.Contains("null", properties.GetProperty("description").GetProperty("type").EnumerateArray().Select(x => x.GetString()));
-        Assert.Equal("array", properties.GetProperty("children").GetProperty("type").GetString());
-        Assert.True(properties.GetProperty("children").GetProperty("items").GetProperty("properties").TryGetProperty("value", out _));
-        Assert.True(properties.GetProperty("counts").TryGetProperty("additionalProperties", out _));
-        Assert.Contains("Open", properties.GetProperty("state").GetProperty("enum").EnumerateArray().Select(x => x.GetString()));
-        Assert.Contains("\"$ref\"", properties.GetProperty("next").GetRawText());
-        Assert.StartsWith("urn:entitytracker:payload:", schema.GetProperty("$id").GetString());
-        var note = entities.GetProperty("Note");
-        Assert.False(note.GetProperty("payloadNullable").GetBoolean());
-        Assert.True(schemas.GetProperty(note.GetProperty("payloadType").GetString()!).GetProperty("properties").TryGetProperty("title", out _));
+        Assert.Equal("SpecPayload", renamed.GetProperty("payloadType").GetString());
+        Assert.Contains("Renamed", root.GetProperty("types").EnumerateArray().Select(x => x.GetString()));
+        AssertPayload(root);
         Assert.Equal(text, await app.GetTestClient().GetStringAsync("/payloads.json"));
+    }
+    private static void AssertPayload(JsonElement root)
+    {
+        Assert.Contains("automated client", root.GetProperty("metadata").GetProperty("description").GetString());
+        var payloads = root.GetProperty("payloads");
+        var properties = payloads.GetProperty("SpecPayload").GetProperty("properties").EnumerateArray()
+            .ToDictionary(p => p.GetProperty("name").GetString()!, p => p.GetProperty("type").GetString());
+        Assert.Equal("string", properties["display_name"]);
+        Assert.False(properties.ContainsKey("secret"));
+        Assert.Equal("string | null | undefined", properties["description"]);
+        Assert.Equal("SpecChild[]", properties["children"]);
+        Assert.Equal("{ [key: string]: number }", properties["counts"]);
+        Assert.Equal("SpecPayload | null | undefined", properties["next"]);
+        Assert.Contains("Open", properties["state"]);
+        Assert.Equal("value", payloads.GetProperty("SpecChild").GetProperty("properties")[0].GetProperty("name").GetString());
     }
 }
