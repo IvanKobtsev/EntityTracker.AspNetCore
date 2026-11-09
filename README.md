@@ -34,13 +34,13 @@ public sealed record CasePayload(int Number);
 
 ## Host setup
 
-The generated namespace is `EntityTracker.Generated.<AssemblyName>` (punctuation becomes underscores).
+Tracked entities are discovered automatically in the application and its referenced assemblies.
 
 ```csharp
 using EntityTracker.AspNetCore;
-using EntityTracker.Generated.MyApplication;
 
-builder.Services.AddEntityTracker<MyScopeResolver>(o => o.AddGeneratedTracking());
+
+builder.Services.AddEntityTracker<MyScopeResolver>();
 builder.Services.AddDbContext<MyDatabase>((sp, options) =>
     options.UseSqlite(connectionString).UseEntityTracker(sp));
 
@@ -52,7 +52,7 @@ app.UseAuthorization();
 
 Implement `ITrackingScopeResolver.ResolveAsync` to return an authorized scope from the current user or the host's background-job context. Never trust an unvalidated scope supplied by a client. The resolver is scoped and also runs during publication; background jobs must establish their authorized scope. A connection's scope is fixed at connect time; reconnect to change it.
 
-Generated registration selects the library's generated hub. No hub class or endpoint mapping is required from the host. Set `o.HubPath = "/realtime/entities"` inside `AddEntityTracker` to change the route. `MapEntityTracker` remains available for explicit mapping and endpoint conventions; using it suppresses automatic mapping.
+The library registers its own hub. No hub class or endpoint mapping is required from the host. Set `o.HubPath = "/realtime/entities"` inside `AddEntityTracker` to change the route. `MapEntityTracker` remains available for explicit mapping and endpoint conventions; using it suppresses automatic mapping.
 
 ### Choose the hub path
 
@@ -61,7 +61,6 @@ To customize the automatically mapped route:
 ```csharp
 builder.Services.AddEntityTracker<MyScopeResolver>(o =>
 {
-    o.AddGeneratedTracking();
     o.HubPath = "/realtime/entities";
 });
 ```
@@ -75,9 +74,18 @@ app.MapEntityTracker("/realtime/entities")
 
 Explicit mapping replaces the automatic endpoint; the default route is not also exposed. The hub requires authentication in either case. Clients connect to the chosen path.
 
-For multiple entity assemblies, call each assembly's generated registration using its fully qualified static class, then call the host application's `AddGeneratedTracking` last. Conflicting entity names across assemblies are rejected at startup.
+Referenced entity assemblies are discovered recursively, even before their types have been used. For plugins outside that graph, add `options.Assemblies.Add(typeof(PluginEntity).Assembly)` in the configuration callback. Each generated assembly is registered once; conflicting entity names across assemblies are rejected at startup.
 
-Optionally register `ITrackingMetadataProvider` implementations to add string metadata to each notification (for example user/session IDs). Metadata keys must be unique. The library contains no Tokyo-specific tenant, project, user, or session fields.
+To include notification metadata, pass its implementation alongside the scope resolver:
+
+```csharp
+builder.Services.AddEntityTracker<MyScopeResolver, MyTrackingMetadataProvider>();
+// A configuration callback is supported by both overloads:
+builder.Services.AddEntityTracker<MyScopeResolver, MyTrackingMetadataProvider>(o =>
+    o.HubPath = "/realtime/entities");
+```
+
+Choose one registration above. The metadata provider is registered with a scoped lifetime and may inject request/job services. It implements `ITrackingMetadataProvider.GetMetadata()` and returns string key/value pairs such as user/session IDs. The interceptor attaches those values to notifications after a successful save. Metadata does not affect scope or subscriptions. The scope-only overload remains available when no metadata is needed. Additional providers can be registered through DI; metadata keys must be unique across providers.
 
 ## Scope resolver examples
 
@@ -109,7 +117,7 @@ public sealed class TenantScopeResolver : ITrackingScopeResolver
 }
 
 // Inside host setup:
-builder.Services.AddEntityTracker<TenantScopeResolver>(o => o.AddGeneratedTracking());
+builder.Services.AddEntityTracker<TenantScopeResolver>();
 ```
 
 All users with the same authorized tenant scope receive the same entity notifications when subscribed. If the application lets users select tenants, use the application's authorization service to check that selection before returning its scope; do not return a raw header/query value. On tenant switches, reconnect and restore subscriptions. A single save must contain changes belonging to the resolved tenant; split cross-tenant jobs into separate scoped saves.
@@ -170,7 +178,7 @@ public sealed class TenantOrJobScopeResolver(TrackingJobContext job)
 }
 
 builder.Services.AddScoped<TrackingJobContext>();
-builder.Services.AddEntityTracker<TenantOrJobScopeResolver>(o => o.AddGeneratedTracking());
+builder.Services.AddEntityTracker<TenantOrJobScopeResolver>();
 
 // Inside a worker, after authorizing the job's tenant:
 using var scope = scopeFactory.CreateScope();
@@ -248,4 +256,3 @@ dotnet pack src/EntityTracker.AspNetCore -c Release -o artifacts
 ```
 
 Tests cover generator diagnostics/output, relational transaction behavior, generated IDs, owned changes, failure/cancellation cleanup, WebSocket subscriptions, scope isolation, reconnect behavior, and payload specifications.
-

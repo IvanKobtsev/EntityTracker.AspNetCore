@@ -17,11 +17,34 @@ public static class EntityTrackerExtensions
         var json = PayloadSpecification.Generate(registry, serializer);
         return endpoints.MapGet(pattern, () => Results.Bytes(json, "application/json"));
     }
-    public static IServiceCollection AddEntityTracker<TScope>(this IServiceCollection services, Action<EntityTrackerOptions> configure)
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public static IServiceCollection AddEntityTracker<TScope>(this IServiceCollection services, Action<EntityTrackerOptions>? configure = null)
+        where TScope : class, ITrackingScopeResolver
+        => AddEntityTrackerCore<TScope>(services, configure, System.Reflection.Assembly.GetCallingAssembly());
+
+    /// <summary>Registers tracking with scoped implementations for audience resolution and notification metadata.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    public static IServiceCollection AddEntityTracker<TScope, TMetadata>(this IServiceCollection services, Action<EntityTrackerOptions>? configure = null)
+        where TScope : class, ITrackingScopeResolver
+        where TMetadata : class, ITrackingMetadataProvider
+    {
+        Microsoft.Extensions.DependencyInjection.Extensions.ServiceCollectionDescriptorExtensions.TryAddEnumerable(
+            services, ServiceDescriptor.Scoped<ITrackingMetadataProvider, TMetadata>());
+        return AddEntityTrackerCore<TScope>(services, configure, System.Reflection.Assembly.GetCallingAssembly());
+    }
+
+    private static IServiceCollection AddEntityTrackerCore<TScope>(IServiceCollection services, Action<EntityTrackerOptions>? configure, System.Reflection.Assembly callingAssembly)
         where TScope : class, ITrackingScopeResolver
     {
-        var options = new EntityTrackerOptions(); configure(options);
-        services.AddSingleton(new TrackingRegistry(options));
+        var options = new EntityTrackerOptions(); configure?.Invoke(options);
+        services.AddSingleton(sp =>
+        {
+            var roots = new List<System.Reflection.Assembly> { callingAssembly, typeof(TScope).Assembly };
+            var applicationName = sp.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>()?.ApplicationName;
+            if (!string.IsNullOrWhiteSpace(applicationName)) roots.Add(System.Reflection.Assembly.Load(applicationName));
+            GeneratedTrackingDiscovery.Register(options, roots);
+            return new TrackingRegistry(options);
+        });
         services.AddSingleton(options.Factory);
         services.AddHttpContextAccessor();
         services.AddScoped<ITrackingScopeResolver, TScope>();

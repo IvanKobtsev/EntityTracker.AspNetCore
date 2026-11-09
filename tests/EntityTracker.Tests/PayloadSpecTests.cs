@@ -34,19 +34,19 @@ public enum SpecState { Open, Closed }
 public class PayloadSpecTests
 {
     [Fact]
-    public async Task Default_path_supports_empty_registry_and_endpoint_conventions()
+    public async Task Default_path_supports_discovery_and_endpoint_conventions()
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseTestServer(); builder.Logging.ClearProviders();
         builder.Services.AddAuthorization(o => o.AddPolicy("SpecReaders", policy => policy.RequireAssertion(_ => true)));
         builder.Services.AddAuthentication();
-        builder.Services.AddEntityTracker<HubTests.Scope>(_ => { });
+        builder.Services.AddEntityTracker<HubTests.Scope>();
         await using var app = builder.Build(); app.UseAuthorization();
         app.MapEntityTrackerSpec().RequireAuthorization("SpecReaders");
         await app.StartAsync();
         using var document = JsonDocument.Parse(await app.GetTestClient().GetStringAsync("/entity-tracker/spec.json"));
-        Assert.Empty(document.RootElement.GetProperty("entities").EnumerateObject());
-        Assert.Empty(document.RootElement.GetProperty("payloads").EnumerateObject());
+        Assert.True(document.RootElement.GetProperty("entities").TryGetProperty("Note", out _));
+        Assert.NotEmpty(document.RootElement.GetProperty("payloads").EnumerateObject());
         var endpoint = ((Microsoft.AspNetCore.Routing.IEndpointRouteBuilder)app).DataSources.SelectMany(x => x.Endpoints)
             .Single(x => x.Metadata.GetMetadata<Microsoft.AspNetCore.Authorization.IAuthorizeData>()?.Policy == "SpecReaders");
         Assert.NotNull(endpoint);
@@ -59,8 +59,6 @@ public class PayloadSpecTests
         builder.Services.AddAuthorization(); builder.Services.AddAuthentication();
         builder.Services.AddEntityTracker<HubTests.Scope>(o =>
         {
-            EntityTracker.Generated.TrackingSample.GeneratedTrackingRegistration.AddGeneratedTracking(o);
-            EntityTracker.Generated.EntityTracker_Tests.GeneratedTrackingRegistration.AddGeneratedTracking(o);
             o.Add(new(typeof(PayloadSpecTests), "NoPayload", _ => "1", _ => null));
         });
         await using var app = builder.Build();

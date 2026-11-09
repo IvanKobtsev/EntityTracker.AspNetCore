@@ -1,12 +1,12 @@
 using System.Security.Claims;
 using EntityTracker.AspNetCore;
-using EntityTracker.Generated.TrackingSample;
+
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddAuthorization();
 builder.Services.AddAuthentication("Bearer").AddJwtBearer();
-builder.Services.AddEntityTracker<SampleScope>(o => o.AddGeneratedTracking());
+builder.Services.AddEntityTracker<SampleScope>();
 builder.Services.AddDbContext<SampleDatabase>((sp, o) => o.UseSqlite("Data Source=tracking.db").UseEntityTracker(sp));
 var app = builder.Build();
 using (var scope = app.Services.CreateScope()) scope.ServiceProvider.GetRequiredService<SampleDatabase>().Database.EnsureCreated();

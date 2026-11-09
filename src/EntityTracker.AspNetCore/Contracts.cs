@@ -22,6 +22,11 @@ public sealed record TrackingDescriptor(Type EntityType, string Name, Func<objec
     Type? PayloadType = null, bool PayloadNullable = true);
 public sealed class EntityTrackerOptions
 {
+    /// <summary>Additional assemblies outside the application's reference graph, such as plugins.</summary>
+    public ICollection<System.Reflection.Assembly> Assemblies { get; } = new List<System.Reflection.Assembly>();
+    private readonly HashSet<System.Reflection.Assembly> generatedAssemblies = [];
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public bool RegisterGeneratedAssembly(System.Reflection.Assembly assembly) => generatedAssemblies.Add(assembly);
     internal Type HubType { get; private set; } = typeof(EntityTrackerHub);
     public string HubPath { get; set; } = "/hubs/EntityTracker";
     internal Func<IServiceProvider, IEntityTrackerClientFactory> Factory { get; private set; } = sp => new EntityTrackerClientFactory<EntityTrackerHub>(Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<Microsoft.AspNetCore.SignalR.IHubContext<EntityTrackerHub>>(sp));
